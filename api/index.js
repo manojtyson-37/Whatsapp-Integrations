@@ -161,9 +161,17 @@ app.post('/api/whatsapp/message', async (req, res) => {
 
   } catch (error) {
     console.error('Error sending message:', error.response?.data || error.message);
+    
+    let errorObj = error.response?.data?.error || { message: error.message || 'Internal Server Error' };
+    
+    // Intercept specific Meta sandbox error
+    if (errorObj.code === 131030) {
+      errorObj.message = "Because you are using Meta Test Keys, you can only send messages to numbers verified in your Meta Dashboard 'Manage phone number list'. Please verify the recipient number there first, or switch to production keys.";
+    }
+
     res.status(error.response?.status || 500).json({
       success: false,
-      error: error.response?.data?.error || { message: error.message || 'Internal Server Error' }
+      error: errorObj
     });
   }
 });
