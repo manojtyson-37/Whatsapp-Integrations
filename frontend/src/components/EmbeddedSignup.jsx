@@ -77,41 +77,20 @@ const EmbeddedSignup = ({ workspaceId, onSetupComplete }) => {
 
     setIsLinking(true);
 
-    const configId = import.meta.env.VITE_FACEBOOK_CONFIG_ID;
-
-    if (configId) {
-      // Full Embedded Signup flow with Tech Provider Config ID (like WATI/Interakt)
-      // This opens a Meta-hosted popup where the client registers their WhatsApp number
-      window.FB.login((response) => {
-        if (!response.authResponse) {
-          setIsLinking(false);
-          toast.error('Login cancelled or failed.');
-        }
-        // The actual phone_number_id and waba_id come via the postMessage listener above
-      }, {
-        config_id: configId,
-        response_type: 'code',
-        override_default_response_type: true,
-        extras: {
-          setup: {},
-          featureType: '',
-          sessionInfoVersion: '3',
-        }
-      });
-    } else {
-      // Fallback: standard FB login with WhatsApp permissions
-      window.FB.login((response) => {
-        if (response.authResponse) {
-          exchangeTokenWithBackend(response.authResponse.accessToken, null, null);
-        } else {
-          setIsLinking(false);
-          toast.error('Login cancelled.');
-        }
-      }, {
-        scope: 'whatsapp_business_management,whatsapp_business_messaging',
-        return_scopes: true
-      });
-    }
+    // Standard FB login with WhatsApp Business permissions
+    // Note: Full Embedded Signup (config_id flow) requires Meta App Review approval
+    // Using basic login flow which works for all users with WhatsApp Business accounts
+    window.FB.login((response) => {
+      if (response.authResponse) {
+        exchangeTokenWithBackend(response.authResponse.accessToken, null, null);
+      } else {
+        setIsLinking(false);
+        toast.error('Login cancelled or failed. Please try again.');
+      }
+    }, {
+      scope: 'whatsapp_business_management,whatsapp_business_messaging',
+      return_scopes: true
+    });
   };
 
   const exchangeTokenWithBackend = async (accessToken, phoneNumberId, wabaId) => {
