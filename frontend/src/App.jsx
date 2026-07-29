@@ -76,6 +76,8 @@ function App() {
                   setWorkspace(wsData);
                   if (wsData.subscription_status !== 'active' && wsData.plan_type !== 'free') {
                     setActiveTab('billing');
+                  } else if (!wsData.meta_phone_number_id && (data.role === 'admin' || data.role === 'manager')) {
+                    setActiveTab('setup');
                   }
                 }
               }
@@ -109,7 +111,7 @@ function App() {
           <Auth 
             supabaseClient={supabase} 
             appearance={{ theme: ThemeSupa }}
-            providers={[]}
+            providers={['google']}
             theme="light"
           />
         </div>
