@@ -112,6 +112,7 @@ function App() {
             supabaseClient={supabase} 
             appearance={{ theme: ThemeSupa }}
             providers={['google']}
+            redirectTo={window.location.origin}
             theme="light"
           />
         </div>

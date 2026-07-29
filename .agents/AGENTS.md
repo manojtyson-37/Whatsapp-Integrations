@@ -12,3 +12,7 @@ When adding new frontend features or data types (e.g., new message formats, new 
 <RULE[roadmap_adherence]>
 ALWAYS consult `ROADMAP.md` in the root directory before starting any major feature or architectural changes. Make sure to adhere to the phases outlined in it. If a phase is completed or requirements change, proactively update `ROADMAP.md` to reflect the latest state.
 </RULE[roadmap_adherence]>
+
+<RULE[live_environment_verification]>
+ALWAYS verify the edits you make directly on the live production environment immediately after a deployment finishes. Do not assume your code works simply because it compiled or worked locally. You must check the live application URL or Vercel logs to confirm the changes are working in production before reporting back to the user.
+</RULE[live_environment_verification]>
