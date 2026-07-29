@@ -7,14 +7,46 @@ const EmbeddedSignup = ({ workspaceId, onSetupComplete }) => {
   const [isLinking, setIsLinking] = useState(false);
 
   useEffect(() => {
+    // Listen for the Embedded Signup message from Meta's popup
+    const handleMessage = (event) => {
+      if (event.origin !== 'https://www.facebook.com' && event.origin !== 'https://web.facebook.com') return;
+      try {
+        const data = JSON.parse(event.data);
+        if (data.type === 'WA_EMBEDDED_SIGNUP') {
+          if (data.event === 'FINISH') {
+            const { phone_number_id, waba_id } = data.data;
+            // Get the access token from the FB auth response and exchange with backend
+            window.FB.getLoginStatus((statusResponse) => {
+              if (statusResponse.status === 'connected') {
+                exchangeTokenWithBackend(statusResponse.authResponse.accessToken, phone_number_id, waba_id);
+              } else {
+                toast.error('Could not retrieve access token after signup.');
+                setIsLinking(false);
+              }
+            });
+          } else if (data.event === 'CANCEL') {
+            setIsLinking(false);
+            toast.error('Setup was cancelled.');
+          } else if (data.event === 'ERROR') {
+            setIsLinking(false);
+            toast.error('An error occurred during setup: ' + (data.data?.error_message || 'Unknown error'));
+          }
+        }
+      } catch (e) {
+        // Not a JSON message or not from Meta, ignore
+      }
+    };
+
+    window.addEventListener('message', handleMessage);
+
     // Load the Facebook SDK
     const loadFbSdk = () => {
       window.fbAsyncInit = function() {
         window.FB.init({
-          appId      : import.meta.env.VITE_FACEBOOK_APP_ID || '', // Needs to be configured in .env
-          cookie     : true,
-          xfbml      : true,
-          version    : 'v19.0'
+          appId  : import.meta.env.VITE_FACEBOOK_APP_ID || '',
+          cookie : true,
+          xfbml  : true,
+          version: 'v21.0'
         });
         setIsSdkLoaded(true);
       };
@@ -23,7 +55,7 @@ const EmbeddedSignup = ({ workspaceId, onSetupComplete }) => {
         var js, fjs = d.getElementsByTagName(s)[0];
         if (d.getElementById(id)) return;
         js = d.createElement(s); js.id = id;
-        js.src = "https://connect.facebook.net/en_US/sdk.js";
+        js.src = 'https://connect.facebook.net/en_US/sdk.js';
         fjs.parentNode.insertBefore(js, fjs);
       }(document, 'script', 'facebook-jssdk'));
     };
@@ -33,6 +65,8 @@ const EmbeddedSignup = ({ workspaceId, onSetupComplete }) => {
     } else {
       setIsSdkLoaded(true);
     }
+
+    return () => window.removeEventListener('message', handleMessage);
   }, []);
 
   const handleFacebookLogin = () => {
@@ -43,28 +77,52 @@ const EmbeddedSignup = ({ workspaceId, onSetupComplete }) => {
 
     setIsLinking(true);
 
-    // Using standard FB login since we don't have the full Tech Provider Config ID setup yet
-    window.FB.login((response) => {
-      if (response.authResponse) {
-        const accessToken = response.authResponse.accessToken;
-        exchangeTokenWithBackend(accessToken);
-      } else {
-        setIsLinking(false);
-        toast.error('Login cancelled.');
-      }
-    }, {
-      scope: 'whatsapp_business_management,whatsapp_business_messaging',
-      return_scopes: true
-    });
+    const configId = import.meta.env.VITE_FACEBOOK_CONFIG_ID;
+
+    if (configId) {
+      // Full Embedded Signup flow with Tech Provider Config ID (like WATI/Interakt)
+      // This opens a Meta-hosted popup where the client registers their WhatsApp number
+      window.FB.login((response) => {
+        if (!response.authResponse) {
+          setIsLinking(false);
+          toast.error('Login cancelled or failed.');
+        }
+        // The actual phone_number_id and waba_id come via the postMessage listener above
+      }, {
+        config_id: configId,
+        response_type: 'code',
+        override_default_response_type: true,
+        extras: {
+          setup: {},
+          featureType: '',
+          sessionInfoVersion: '3',
+        }
+      });
+    } else {
+      // Fallback: standard FB login with WhatsApp permissions
+      window.FB.login((response) => {
+        if (response.authResponse) {
+          exchangeTokenWithBackend(response.authResponse.accessToken, null, null);
+        } else {
+          setIsLinking(false);
+          toast.error('Login cancelled.');
+        }
+      }, {
+        scope: 'whatsapp_business_management,whatsapp_business_messaging',
+        return_scopes: true
+      });
+    }
   };
 
-  const exchangeTokenWithBackend = async (accessToken) => {
+  const exchangeTokenWithBackend = async (accessToken, phoneNumberId, wabaId) => {
     const backendUrl = import.meta.env.VITE_BACKEND_URL || (import.meta.env.DEV ? 'http://localhost:3000' : '');
     
     try {
       const res = await axios.post(`${backendUrl}/api/workspaces/oauth`, {
         workspace_id: workspaceId,
-        access_token: accessToken
+        access_token: accessToken,
+        ...(phoneNumberId && { phone_number_id: phoneNumberId }),
+        ...(wabaId && { waba_id: wabaId }),
       });
 
       if (res.data.success) {

@@ -784,10 +784,114 @@ app.post('/api/workspaces/update', async (req, res) => {
   }
 });
 
+/**
+ * OAuth Token Exchange - Called after Facebook Embedded Signup
+ * Receives user access token, exchanges it, fetches WABA/phone details, saves to workspace
+ */
+app.post('/api/workspaces/oauth', async (req, res) => {
+  try {
+    const { workspace_id, access_token, phone_number_id, waba_id } = req.body;
+    if (!workspace_id || !access_token) {
+      return res.status(400).json({ error: 'workspace_id and access_token are required' });
+    }
+
+    const appId = process.env.VITE_FACEBOOK_APP_ID || process.env.FACEBOOK_APP_ID;
+    const appSecret = process.env.FACEBOOK_APP_SECRET;
+
+    let finalPhoneNumberId = phone_number_id;
+    let finalWabaId = waba_id;
+    let finalAccessToken = access_token;
+
+    // Step 1: Exchange short-lived token for long-lived token (if app secret is available)
+    if (appId && appSecret) {
+      try {
+        const tokenExchangeRes = await axios.get(
+          `https://graph.facebook.com/v21.0/oauth/access_token`,
+          {
+            params: {
+              grant_type: 'fb_exchange_token',
+              client_id: appId,
+              client_secret: appSecret,
+              fb_exchange_token: access_token,
+            }
+          }
+        );
+        if (tokenExchangeRes.data.access_token) {
+          finalAccessToken = tokenExchangeRes.data.access_token;
+        }
+      } catch (exchangeErr) {
+        console.warn('Token exchange failed, using original token:', exchangeErr.message);
+      }
+    }
+
+    // Step 2: If phone_number_id and waba_id were not sent directly from Embedded Signup,
+    // fetch them from the Meta API using the access token
+    if (!finalPhoneNumberId || !finalWabaId) {
+      try {
+        // Get the user's WhatsApp Business Accounts
+        const wabaRes = await axios.get(
+          `https://graph.facebook.com/v21.0/me/businesses`,
+          { params: { access_token: finalAccessToken, fields: 'id,name,whatsapp_business_accounts' } }
+        );
+
+        const businesses = wabaRes.data?.data || [];
+        for (const business of businesses) {
+          // Get WABAs for this business
+          const wabaDRes = await axios.get(
+            `https://graph.facebook.com/v21.0/${business.id}/owned_whatsapp_business_accounts`,
+            { params: { access_token: finalAccessToken } }
+          );
+          const wabas = wabaDRes.data?.data || [];
+          if (wabas.length > 0) {
+            finalWabaId = wabas[0].id;
+
+            // Get phone numbers for this WABA
+            const phoneRes = await axios.get(
+              `https://graph.facebook.com/v21.0/${finalWabaId}/phone_numbers`,
+              { params: { access_token: finalAccessToken } }
+            );
+            const phones = phoneRes.data?.data || [];
+            if (phones.length > 0) {
+              finalPhoneNumberId = phones[0].id;
+            }
+            break;
+          }
+        }
+      } catch (fetchErr) {
+        console.warn('Could not auto-fetch WABA/phone details:', fetchErr.message);
+      }
+    }
+
+    // Step 3: Save to workspace
+    const updatePayload = {
+      meta_access_token: finalAccessToken,
+    };
+    if (finalPhoneNumberId) updatePayload.meta_phone_number_id = finalPhoneNumberId;
+    if (finalWabaId) updatePayload.meta_waba_id = finalWabaId;
+
+    const { error: updateError } = await supabase
+      .from('workspaces')
+      .update(updatePayload)
+      .eq('id', workspace_id);
+
+    if (updateError) throw updateError;
+
+    res.status(200).json({
+      success: true,
+      phone_number_id: finalPhoneNumberId,
+      waba_id: finalWabaId,
+    });
+  } catch (error) {
+    console.error('OAuth exchange error:', error);
+    res.status(500).json({ error: 'Failed to complete OAuth setup', details: error.message });
+  }
+});
+
 // Health Check Endpoint
 app.get('/health', (req, res) => {
   res.status(200).json({ status: 'OK', message: 'WhatsApp multi-provider proxy is running' });
 });
+
 
 // --- ADVANCED CRM & CONTACT MANAGEMENT ---
 
